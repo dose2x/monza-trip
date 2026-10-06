@@ -1,0 +1,13 @@
+# Private: never goes in the public repo.
+# Guide photos are uploaded to the trip database instead (see worker/src/index.js).
+lewis*
+guide.*
+# Rachel's plan export, with order and refund numbers.
+monza_2027_trip.json
+plan.private.js
+TRIP-LINK.txt
+tools/
+*.backup.json
+worker/.wrangler/
+# The sync service is deployed with wrangler, not through this repo.
+worker/
