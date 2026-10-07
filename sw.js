@@ -1,6 +1,8 @@
 // Offline support: the app shell is fetched fresh when the network is quick, and served from the saved copy
 // when it is slow or absent. Bump CACHE when the list of shell files changes.
-const CACHE = 'monza-shell-v7';
+// A trial copy published under /calm/ keeps its own shell cache, so it and the main app never clear each other's.
+const FAMILY = self.registration.scope.includes('/calm/') ? 'monza-calm-shell-' : 'monza-shell-';
+const CACHE = FAMILY + 'v7';
 const TILES = 'monza-tiles-v1';
 const MAX_TILES = 1500;
 const SLOW_MS = 2500;
@@ -15,7 +17,7 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== TILES && !k.startsWith('monza-photos')).map(k => caches.delete(k))))
+    .then(keys => Promise.all(keys.filter(k => k.startsWith(FAMILY) && k !== CACHE).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
