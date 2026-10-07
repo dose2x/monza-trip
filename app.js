@@ -30,7 +30,7 @@ const TODO_GROUPS = ['Race tickets', 'Book first', 'Then book', 'Two weeks befor
 // ---------- State ----------
 // Everything is an item with an id, a type and an updatedAt stamp. Sync merges item by item, newest wins.
 let state = { items: {}, dirty: {}, cursor: 0 };
-let ui = { tab: 'trip', list: 'todo', radio: 0, photo: '', bounds: [] };
+let ui = { tab: 'today', seg: 'days', sub: null, skip: 0, open: {}, photo: '', bounds: [] };
 let map = null;
 let mapLayers = null;
 let syncState = 'local';
@@ -151,13 +151,10 @@ function applyTheme() {
   const saved = localStorage.getItem(LS_THEME);
   const theme = saved || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.documentElement.dataset.theme = theme;
-  const btn = $('[data-act=theme]');
-  btn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
-  btn.classList.toggle('is-light', theme === 'light');
 }
 function showPhoto(src) {
   ui.photo = src;
-  if (ui.tab === 'trip' && !$('#sheet').open) render();
+  if (ui.tab === 'today' && !ui.sub && !$('#sheet').open) render();
 }
 async function nextPhoto() {
   const turn = Number(localStorage.getItem(LS_PHOTO)) || 0;
@@ -200,23 +197,61 @@ async function nextPhoto() {
 }
 
 // ---------- Render ----------
+// Three tabs (Today, Trip, Get ready). Anything deeper opens as its own screen with a back button,
+// so each screen shows one thing at a time.
+const ICON = {
+  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
+  chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>',
+  todo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  ticket: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/></svg>',
+  bag: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="12" rx="3"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>',
+  coin: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M14.5 9.5c-.6-.9-1.500-1.300-2.600-1.300-1.400 0-2.400.8-2.400 1.900 0 2.600 5.200 1.200 5.200 3.900 0 1.100-1.100 1.900-2.600 1.900-1.200 0-2.200-.5-2.800-1.400M12 6.500v1.700M12 15.900v1.600"/></svg>',
+};
+function isOpen(key, fallback) { return key in ui.open ? ui.open[key] : fallback; }
+function phase() {
+  const s = settings(), today = isoDate(new Date());
+  return today < s.start ? 'before' : today > s.end ? 'after' : 'during';
+}
+function openTodos() {
+  return all('todo').filter(t => t.list === 'todo' && !t.done)
+    .sort((a, b) => TODO_GROUPS.indexOf(a.group || 'Other') - TODO_GROUPS.indexOf(b.group || 'Other'));
+}
+function head(title, back, sub) {
+  return '<header class="bar">' + (back ? '<button class="round" data-act="back" aria-label="Back">' + ICON.back + '</button>' : '') +
+    '<div><h1>' + esc(title) + '</h1>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div></header>';
+}
+function steps(rows) { return '<ol class="steps">' + rows.join('') + '</ol>'; }
+function eventStep(e) {
+  return '<li><button class="step" data-act="edit-event" data-id="' + esc(e.id) + '"><span class="sdot k-' + esc(e.kind) + '"></span>' +
+    '<span><b>' + esc(e.title) + '</b>' + (e.time || e.note ? '<small>' + esc([e.time, e.note].filter(Boolean).join(' · ')) + '</small>' : '') + '</span></button></li>';
+}
+function dayEvents(date) {
+  return all('event').filter(e => e.date === date).sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1);
+}
+
 function render() {
   document.querySelectorAll('.tabs button').forEach(b => {
     const on = b.dataset.tab === ui.tab;
     b.classList.toggle('on', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
-  renderCountdown();
   const box = $('#new-todo');
   const draft = box && { list: box.dataset.list, text: box.value, focus: document.activeElement === box };
   const view = $('#view');
-  view.classList.toggle('map-mode', ui.tab === 'map');
-  if (ui.tab !== 'map' && map) { map.remove(); map = null; }
-  if (ui.tab === 'trip') view.innerHTML = tripView();
-  else if (ui.tab === 'map') mapView(view);
-  else if (ui.tab === 'bookings') view.innerHTML = bookingsView();
-  else if (ui.tab === 'budget') view.innerHTML = budgetView();
-  else view.innerHTML = listsView();
+  const mapOn = ui.tab === 'trip' && ui.seg === 'map' && !ui.sub;
+  view.classList.toggle('map-mode', mapOn);
+  if (!mapOn && map) { map.remove(); map = null; }
+  if (mapOn) mapView(view);
+  else if (ui.sub) view.innerHTML = subView();
+  else view.innerHTML = ui.tab === 'today' ? todayView() : ui.tab === 'trip' ? daysView() : planView();
+  // A different screen starts at its top; redrawing the same screen keeps its place.
+  const screen = ui.tab + '/' + (ui.sub ? ui.sub.type + (ui.sub.date || '') : ui.seg || '');
+  if (screen !== ui.screen) { view.scrollTop = ui.sub ? 0 : ui.scrollBack || 0; ui.scrollBack = 0; ui.screen = screen; }
+  const hero = ui.tab === 'today' && !ui.sub;
+  $('meta[name=theme-color]').content = getComputedStyle(document.documentElement).getPropertyValue(hero ? '--red' : '--bg').trim();
   const again = $('#new-todo');
   if (draft && again && again.dataset.list === draft.list) {
     again.value = draft.text;
@@ -224,140 +259,177 @@ function render() {
   }
 }
 
-function renderCountdown() {
-  const s = settings();
-  $('#eyebrow').textContent = s.title || 'Trip planner';
-  const today = isoDate(new Date());
-  const toTrip = daysUntil(s.start);
-  const toRace = daysUntil(RACE_DATE);
-  const block = (n, label) => '<div><b>' + esc(n) + '</b><span>' + esc(label) + '</span></div>';
-  let html;
-  if (today > s.end) html = '<div class="wide"><b>Chequered flag</b><span>Trip complete</span></div>';
-  else if (toTrip > 0) html = block(toTrip, toTrip === 1 ? 'Day to go' : 'Days to go') + block(toRace, 'To lights out') +
-    '<div class="wide"><b>' + esc(fmtDate(s.start) + ' to ' + fmtDate(s.end)) + '</b><span>2027</span></div>';
-  else {
-    const list = tripDates();
-    html = block(list.indexOf(today) + 1, 'Day of ' + list.length) + (toRace >= 0 ? block(toRace, 'To lights out') : '') +
-      '<div class="wide"><b>' + esc(dayItem(today).title || 'Open day') + '</b><span>Today</span></div>';
-  }
-  $('#countdown').innerHTML = html;
+function subView() {
+  const t = ui.sub.type;
+  if (t === 'day') return dayView(ui.sub.date);
+  if (t === 'bookings') return bookingsView();
+  if (t === 'budget') return budgetView();
+  return listView(t);
 }
 
-// The guide: short race-engineer radio calls built from what is still open.
-function radioMessages() {
+// ----- Today: one greeting, one thing to do next -----
+function todayView() {
   const s = settings();
   const today = isoDate(new Date());
   const me = localStorage.getItem(LS_ME) || 'Rachel';
-  const msgs = [];
-  const openTodos = all('todo').filter(t => t.list === 'todo' && !t.done)
-    .sort((a, b) => TODO_GROUPS.indexOf(a.group || 'Other') - TODO_GROUPS.indexOf(b.group || 'Other'));
-  const openBookings = all('booking').filter(b => b.status !== 'booked');
-  if (today >= s.start && today <= s.end) {
-    const d = dayItem(today);
-    msgs.push('OK ' + me + ', today: ' + (d.title || 'open day') + '.' + (d.drive ? ' Drive time ' + d.drive.toLowerCase() + '.' : ''));
-    if (d.backup) msgs.push('Plan B if the weather turns: ' + d.backup);
-    if (d.base) msgs.push('Tonight: ' + d.base + '.');
-  } else if (today < s.start) {
-    msgs.push('OK ' + me + ', it\'s hammer time. ' + daysUntil(s.start) + ' days to wheels up, ' + daysUntil(RACE_DATE) + ' to lights out at Monza.');
-    if (openTodos[0]) msgs.push('Next on the run plan: ' + openTodos[0].text + '.');
-    if (openTodos[1]) msgs.push('After that: ' + openTodos[1].text + '.');
-    if (openBookings.length) msgs.push(openBookings.length + ' bookings still open. Flights and the Porsche come first, then hotels.');
-    else msgs.push('Everything is booked. Copy, we are P1.');
+  const dark = document.documentElement.dataset.theme === 'dark';
+  const ph = phase();
+  let line, bubble;
+  if (ph === 'before') {
+    const n = daysUntil(s.start);
+    line = n === 1 ? 'Wheels up tomorrow' : n + ' days until wheels up';
+    const r = daysUntil(RACE_DATE);
+    bubble = 'It\'s hammer time. ' + (r === 1 ? 'Lights out at Monza tomorrow.' : r + ' days to lights out at Monza.');
+  } else if (ph === 'during') {
+    const list = tripDates();
+    line = 'Day ' + (list.indexOf(today) + 1) + ' of ' + list.length;
+    bubble = 'Today: ' + (dayItem(today).title || 'an open day') + '.';
   } else {
-    msgs.push('Get in there, ' + me + '. What a drive.');
+    line = 'Home again';
+    bubble = 'Get in there. What a drive.';
   }
-  return msgs;
-}
-function radioCard() {
-  const msgs = radioMessages();
-  const i = ui.radio % msgs.length;
-  const bars = [5, 9, 12, 7, 10, 4, 8].map(h => '<i style="height:' + h + 'px"></i>').join('');
-  return '<section class="radio" aria-label="Team radio">' +
-    '<div class="who">' + (ui.photo ? '<img src="' + esc(ui.photo) + '" alt="Lewis Hamilton">' : '<span aria-hidden="true">44</span>') + '</div>' +
-    '<div class="body"><div class="label">Team radio <span class="bars" aria-hidden="true">' + bars + '</span></div>' +
-    '<p>' + esc(msgs[i]) + '</p>' +
-    (msgs.length > 1 ? '<div class="row"><button class="btn sm" data-act="radio">Next message</button><span class="count">' + (i + 1) + ' / ' + msgs.length + '</span></div>' : '') +
-    '</div></section>';
-}
+  let html = '<section class="hero"><div class="hero-btns">' +
+    '<button class="round" data-act="theme" aria-label="' + (dark ? 'Switch to light theme' : 'Switch to dark theme') + '">' + (dark ? ICON.sun : ICON.moon) + '</button>' +
+    '<button class="round" data-act="settings" aria-label="Settings">' + ICON.gear + '</button></div>' +
+    '<div class="sun">' + (ui.photo ? '<img src="' + esc(ui.photo) + '" alt="Lewis Hamilton">' : '<span aria-hidden="true">44</span>') + '</div>' +
+    '<h1>Ciao, ' + esc(me) + '</h1><p>' + esc(line) + '</p>' +
+    '<div class="flag" aria-hidden="true"><i></i><i></i><i></i></div></section><div class="wrap">';
 
-function tripView() {
-  const today = isoDate(new Date());
-  const events = all('event');
-  let html = '<div class="wrap">';
-  // Until the plan has arrived there is nothing to guide: say how to get it instead.
-  if (!events.length && !all('booking').length) {
-    const key = localStorage.getItem(LS_KEY);
-    return html + '<section class="card corner" style="padding:16px"><h2 style="margin:0 0 6px;font-size:18px;text-transform:uppercase">' +
-      (key && CONFIG.api ? 'Loading the trip' : 'Link this phone') + '</h2><p class="muted" style="margin:0 0 12px">' +
-      (key && CONFIG.api ? 'Fetching the plan. This needs a connection the first time.'
-        : 'Open the trip link you were sent, or paste the trip code in Settings.') + '</p>' +
-      '<button class="btn primary" data-act="' + (key && CONFIG.api ? 'retry' : 'settings') + '">' + (key && CONFIG.api ? 'Try again' : 'Open Settings') + '</button></section></div>';
+  // Until the plan has arrived there is nothing to show: say how to get it instead.
+  if (!all('event').length && !all('booking').length) {
+    const linked = localStorage.getItem(LS_KEY) && CONFIG.api;
+    return html + '<section class="card pad"><h2 class="title">' + (linked ? 'Loading the trip' : 'Link this phone') + '</h2><p class="muted">' +
+      (linked ? 'Fetching the plan. This needs a connection the first time.' : 'Open the trip link you were sent, or paste the trip code in Settings.') + '</p>' +
+      '<button class="pill primary" data-act="' + (linked ? 'retry' : 'settings') + '">' + (linked ? 'Try again' : 'Open Settings') + '</button></section></div>';
   }
-  html += radioCard();
-  for (const date of tripDates()) {
-    const day = dayItem(date);
-    const d = parseDate(date);
-    const evs = events.filter(e => e.date === date).sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1);
-    const cls = ['card', 'corner', 'day', RACE_DAYS.includes(date) ? 'race' : '', SPECIAL_DAYS.includes(date) ? 'special' : '', date === today ? 'today' : ''].join(' ');
-    html += '<section class="' + cls + '">' +
-      '<button class="day-head" data-act="edit-day" data-id="' + esc(day.id) + '">' +
-      '<div class="date-badge"><b>' + String(d.getDate()).padStart(2, '0') + '</b><i>' + d.toLocaleDateString('en-US', { weekday: 'short' }) + '</i></div>' +
-      '<div><div class="day-title">' + esc(day.title || 'Open day') + '</div>' + (day.base ? '<div class="day-base">Overnight: ' + esc(day.base) + '</div>' : '') + '</div></button>';
-    if (day.note) html += '<p class="day-note">' + esc(day.note) + '</p>';
-    const facts = [['Drive', day.drive], ['Roads', day.roads], ['Backup', day.backup]].filter(f => f[1]);
-    if (facts.length) html += '<dl class="facts">' + facts.map(f => '<dt>' + f[0] + '</dt><dd>' + esc(f[1]) + '</dd>').join('') + '</dl>';
-    if (safeUrl(day.map)) html += '<div class="day-actions"><a class="btn sm" href="' + esc(safeUrl(day.map)) + '" target="_blank" rel="noopener">Open route in Google Maps</a></div>';
-    html += '<ul class="events">';
-    for (const e of evs) {
-      html += '<li><button class="event" data-act="edit-event" data-id="' + esc(e.id) + '">' +
-        '<span class="dot k-' + esc(e.kind) + '"></span><span class="time">' + esc(e.time || 'TBC') + '</span>' +
-        '<span class="what">' + esc(e.title) + (e.note ? '<small>' + esc(e.note) + '</small>' : '') + '</span></button></li>';
+  html += '<p class="bubble">' + esc(bubble) + '</p>';
+
+  if (ph === 'during') {
+    const d = dayItem(today);
+    const evs = dayEvents(today);
+    html += '<h2 class="label">Today</h2><section class="card">' +
+      '<button class="rowlink" data-act="open" data-sub="day" data-date="' + today + '"><span><b>' + esc(d.title || 'Open day') + '</b>' +
+      (d.base ? '<small>Tonight: ' + esc(d.base) + '</small>' : '') + '</span>' + ICON.chev + '</button>' +
+      (evs.length ? steps(evs.map(eventStep)) : '') + '</section>';
+  }
+
+  const open = openTodos();
+  if (open.length) {
+    const next = open[ui.skip % open.length];
+    const rest = open.filter(t => t.id !== next.id).slice(0, 2);
+    html += '<h2 class="label">Next up</h2><section class="card pad focus">' +
+      '<p class="tag">' + esc(next.group || 'To do') + '</p><p class="big">' + esc(next.text) + '</p>' +
+      '<div class="row"><button class="pill primary" data-act="done-next" data-id="' + esc(next.id) + '">Mark done</button>' +
+      (open.length > 1 ? '<button class="pill quiet" data-act="skip-next">Not now</button>' : '') + '</div></section>';
+    if (rest.length) {
+      html += '<h2 class="label">After that</h2>' + steps(rest.map(t =>
+        '<li><button class="step" data-act="open" data-sub="todo"><span class="sdot"></span><span><b>' + esc(t.text) + '</b></span></button></li>'));
     }
-    html += '</ul><button class="add-line" data-act="add-event" data-date="' + date + '">+ Add to this day</button></section>';
-  }
-  const dates = tripDates();
-  const strays = events.filter(e => !dates.includes(e.date));
-  if (strays.length) {
-    html += '<h2 class="section-title">Outside the trip dates <small>' + strays.length + '</small></h2><section class="card corner day"><ul class="events" style="border-top:0">' +
-      strays.map(e => '<li><button class="event" data-act="edit-event" data-id="' + esc(e.id) + '"><span class="dot k-' + esc(e.kind) + '"></span>' +
-        '<span class="time">' + esc(fmtDate(e.date) || 'No day') + '</span><span class="what">' + esc(e.title) + '<small>Tap to move it to a trip day, or delete it.</small></span></button></li>').join('') +
-      '</ul></section>';
+    html += '<button class="link" data-act="open" data-sub="todo">See everything to do (' + open.length + ')</button>';
+  } else {
+    html += '<section class="card pad focus"><p class="big">Nothing left to do.</p><p class="muted" style="margin:0">Copy, we are P1.</p></section>';
   }
   return html + '</div>';
 }
 
+// ----- Trip: one line per day, details one tap away -----
+function tripHead() {
+  return head('The trip', false, settings().title) + '<div class="wrap"><div class="seg">' +
+    '<button data-act="seg" data-seg="days" aria-pressed="' + (ui.seg !== 'map') + '" class="' + (ui.seg !== 'map' ? 'on' : '') + '">Days</button>' +
+    '<button data-act="seg" data-seg="map" aria-pressed="' + (ui.seg === 'map') + '" class="' + (ui.seg === 'map' ? 'on' : '') + '">Map</button></div></div>';
+}
+function daysView() {
+  const today = isoDate(new Date());
+  const dates = tripDates();
+  let html = tripHead() + '<div class="wrap"><ol class="days">';
+  for (const date of dates) {
+    const day = dayItem(date);
+    const d = parseDate(date);
+    const cls = ['dayrow', RACE_DAYS.includes(date) ? 'race' : '', SPECIAL_DAYS.includes(date) ? 'special' : '', date === today ? 'today' : ''].join(' ');
+    html += '<li><button class="' + cls + '" data-act="open" data-sub="day" data-date="' + date + '">' +
+      '<span class="dnum"><b>' + d.getDate() + '</b><i>' + d.toLocaleDateString('en-US', { weekday: 'short' }) + '</i></span>' +
+      '<span class="dtext"><b>' + esc(day.title || 'Open day') + '</b>' + (day.base ? '<small>' + esc(day.base) + '</small>' : '') + '</span>' + ICON.chev + '</button></li>';
+  }
+  html += '</ol>';
+  const strays = all('event').filter(e => !dates.includes(e.date));
+  if (strays.length) {
+    html += '<h2 class="label">Outside the trip dates</h2><p class="muted small">Tap one to move it to a trip day, or delete it.</p>' + steps(strays.map(eventStep));
+  }
+  return html + '</div>';
+}
+function dayView(date) {
+  const day = dayItem(date);
+  const evs = dayEvents(date);
+  let html = head(fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric' }), true) + '<div class="wrap">' +
+    '<h2 class="title">' + esc(day.title || 'Open day') + '</h2>' +
+    (day.base ? '<p class="muted">Overnight: ' + esc(day.base) + '</p>' : '') +
+    (day.note ? '<p class="note">' + esc(day.note) + '</p>' : '');
+  html += '<h3 class="label">Plans</h3>' + (evs.length ? steps(evs.map(eventStep)) : '<p class="muted">Nothing planned yet.</p>') +
+    '<button class="pill" data-act="add-event" data-date="' + date + '">+ Add a plan</button>';
+  const facts = [['Drive', day.drive], ['Roads', day.roads], ['Backup', day.backup]].filter(f => f[1]);
+  if (facts.length || safeUrl(day.map)) {
+    const key = 'drive-' + date;
+    html += '<details class="fold" data-key="' + key + '"' + (isOpen(key, false) ? ' open' : '') + '><summary>Driving details' + ICON.chev + '</summary>' +
+      '<dl class="facts">' + facts.map(f => '<dt>' + f[0] + '</dt><dd>' + esc(f[1]) + '</dd>').join('') + '</dl>' +
+      (safeUrl(day.map) ? '<a class="pill" href="' + esc(safeUrl(day.map)) + '" target="_blank" rel="noopener">Open route in Google Maps</a>' : '') + '</details>';
+  }
+  return html + '<button class="link" data-act="edit-day" data-id="' + esc(day.id) + '">Edit this day</button></div>';
+}
+
+// ----- Get ready: four doors, each with one line of status -----
+function planView() {
+  const todos = all('todo');
+  const open = openTodos();
+  const pack = todos.filter(t => t.list === 'pack' && !t.done).length;
+  const bookings = all('booking');
+  const toBook = bookings.filter(b => b.status !== 'booked').length;
+  const b = budgetTotals();
+  const door = (sub, color, icon, title, status) =>
+    '<button class="card door" data-act="open" data-sub="' + sub + '"><span class="blob ' + color + '">' + icon + '</span>' +
+    '<span class="dtext"><b>' + title + '</b><small>' + esc(status) + '</small></span>' + ICON.chev + '</button>';
+  return head('Get ready') + '<div class="wrap">' +
+    door('todo', 'b-green', ICON.todo, 'To do', open.length ? open.length + ' left' : 'All done') +
+    door('bookings', 'b-red', ICON.ticket, 'Bookings', toBook ? toBook + ' still to book' : 'Everything is booked') +
+    door('pack', 'b-yellow', ICON.bag, 'Packing', pack ? pack + ' to pack' : 'All packed') +
+    door('budget', 'b-blue', ICON.coin, 'Budget', b.budget ? money(b.left) + ' left of ' + money(b.budget) : money(b.total) + ' so far') +
+    '</div>';
+}
+
 function bookingsView() {
-  const list = all('booking').sort((a, b) => (a.start || '') < (b.start || '') ? -1 : 1);
-  const card = b => {
-    const booked = b.status === 'booked';
-    const dates = b.start ? fmtDate(b.start) + (b.end && b.end !== b.start ? ' to ' + fmtDate(b.end) : '') : '';
-    return '<button class="card corner booking ' + (booked ? 'booked' : '') + '" data-act="edit-booking" data-id="' + esc(b.id) + '">' +
-      '<span class="dot k-' + esc(b.kind) + '"></span><span class="body">' +
-      '<span class="tag ' + (booked ? 'ok' : 'open') + '">' + esc(cap(b.kind)) + ' · ' + (booked ? 'Booked' : 'To book') + '</span>' +
-      '<b>' + esc(b.title) + '</b>' +
-      '<span class="meta">' + esc(dates) + (Number(b.cost) ? ' · ' + money(b.cost, b.cur) : '') + '</span>' +
-      (b.conf ? '<span class="conf">' + esc(b.conf) + '</span>' : '') +
-      (b.note ? '<span class="meta">' + esc(b.note) + '</span>' : '') + '</span></button>';
+  const list = all('booking').sort((a, b) => (a.start || '9') < (b.start || '9') ? -1 : 1);
+  const row = b => {
+    const dates = b.start ? fmtDate(b.start) + (b.end && b.end !== b.start ? ' to ' + fmtDate(b.end) : '') : 'No date yet';
+    return '<button class="card rowcard" data-act="edit-booking" data-id="' + esc(b.id) + '"><span class="sdot k-' + esc(b.kind) + '"></span>' +
+      '<span class="dtext"><b>' + esc(b.title) + '</b><small>' + esc(dates) + (Number(b.cost) ? ' · ' + money(b.cost, b.cur) : '') + '</small>' +
+      (b.conf ? '<span class="conf">' + esc(b.conf) + '</span>' : '') + '</span>' + ICON.chev + '</button>';
   };
   const todo = list.filter(b => b.status !== 'booked');
   const booked = list.filter(b => b.status === 'booked');
-  let html = '<div class="wrap">';
-  html += '<h2 class="section-title">Booked <small>' + booked.length + '</small></h2>';
-  html += booked.length ? booked.map(card).join('') : '<p class="empty card">Nothing booked yet.</p>';
-  html += '<h2 class="section-title">Still to book <small>' + todo.length + '</small></h2>' + todo.map(card).join('');
-  html += '<button class="btn ghost" data-act="add-booking">+ Add a booking</button></div>';
-  return html;
+  const fold = (key, title, rows, fallback) => rows.length
+    ? '<details class="fold" data-key="' + key + '"' + (isOpen(key, fallback) ? ' open' : '') + '><summary>' + title + ' (' + rows.length + ')' + ICON.chev + '</summary>' + rows.map(row).join('') + '</details>' : '';
+  // Before the trip the open bookings matter; on the road the confirmed ones do.
+  const during = phase() !== 'before';
+  const parts = [fold('bk-todo', 'Still to book', todo, !during), fold('bk-done', 'Booked', booked, during || !todo.length)];
+  return head('Bookings', true) + '<div class="wrap">' + (during ? parts.reverse() : parts).join('') +
+    (list.length ? '' : '<p class="muted">No bookings yet.</p>') +
+    '<button class="pill" data-act="add-booking">+ Add a booking</button></div>';
 }
 
-function budgetView() {
+function budgetTotals() {
   const s = settings();
-  const expenses = all('expense').sort((a, b) => (a.date || '') < (b.date || '') ? 1 : -1);
+  const expenses = all('expense');
   const bookings = all('booking').filter(b => Number(b.cost) > 0);
   const spent = expenses.reduce((t, e) => t + toUSD(e.amount, e.cur), 0);
   const booked = bookings.filter(b => b.status === 'booked').reduce((t, b) => t + toUSD(b.cost, b.cur), 0);
   const planned = bookings.filter(b => b.status !== 'booked').reduce((t, b) => t + toUSD(b.cost, b.cur), 0);
-  const total = spent + booked;
   const budget = Number(s.budget) || 0;
+  const total = spent + booked;
+  return { expenses, bookings, total, planned, budget, left: budget - total - planned };
+}
+function budgetView() {
+  const s = settings();
+  const { expenses, bookings, total, planned, budget, left } = budgetTotals();
+  expenses.sort((a, b) => (a.date || '') < (b.date || '') ? 1 : -1);
   const byCat = {};
   for (const e of expenses) byCat[e.cat || 'Other'] = (byCat[e.cat || 'Other'] || 0) + toUSD(e.amount, e.cur);
   for (const b of bookings.filter(x => x.status === 'booked')) {
@@ -365,59 +437,60 @@ function budgetView() {
     byCat[c] = (byCat[c] || 0) + toUSD(b.cost, b.cur);
   }
   const max = Math.max(1, ...Object.values(byCat));
-  let html = '<div class="wrap"><div class="stats">' +
-    '<div class="card corner stat"><b>' + money(total) + '</b><span>Committed</span></div>' +
-    '<div class="card corner stat"><b>' + money(planned) + '</b><span>Estimated</span></div>' +
-    '<div class="card corner stat"><b>' + (budget ? money(budget - total - planned) : '--') + '</b><span>Left</span></div></div>';
+  let html = head('Budget', true) + '<div class="wrap"><section class="card pad">';
   if (budget) {
     const pct = Math.min(100, (total + planned) / budget * 100);
-    html += '<div class="meter"><i class="' + (total + planned > budget ? 'over' : '') + '" style="width:' + pct.toFixed(0) + '%"></i></div>' +
-      '<p class="small muted" style="margin:0">' + money(total + planned) + ' of ' + money(budget) + ' all-in target, in US dollars</p>';
+    html += '<p class="huge">' + money(left) + '</p><p class="muted" style="margin:0">left of ' + money(budget) + '</p>' +
+      '<div class="meter"><i class="' + (left < 0 ? 'over' : '') + '" style="width:' + pct.toFixed(0) + '%"></i></div>';
+  } else {
+    html += '<p class="huge">' + money(total) + '</p><p class="muted" style="margin:0">committed so far</p>';
   }
-  html += '<div class="row" style="margin-top:12px"><button class="btn sm" data-act="edit-budget">' + (budget ? 'Budget and rates' : 'Set a budget') + '</button>' +
-    '<span class="small muted">1 EUR = $' + esc(s.rateEUR) + ' · 1 CHF = $' + esc(s.rateCHF) + '</span></div>';
+  html += '<p class="small muted" style="margin:10px 0 0">' + money(total) + ' paid or booked' + (planned ? ' · ' + money(planned) + ' estimated' : '') + ', in US dollars</p></section>' +
+    '<button class="pill" data-act="add-expense">+ Add an expense</button>';
   const cats = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]);
   if (cats.length) {
-    html += '<h2 class="section-title">By category</h2><div class="card corner" style="padding:6px 0">';
-    for (const c of cats) {
-      html += '<div class="cat"><span>' + esc(c) + '</span><div class="meter"><i style="width:' + (byCat[c] / max * 100).toFixed(0) + '%"></i></div><b>' + money(byCat[c]) + '</b></div>';
-    }
-    html += '</div>';
+    html += '<details class="fold" data-key="bd-cats"' + (isOpen('bd-cats', false) ? ' open' : '') + '><summary>By category' + ICON.chev + '</summary>' +
+      cats.map(c => '<div class="cat"><span>' + esc(c) + '</span><div class="meter"><i style="width:' + (byCat[c] / max * 100).toFixed(0) + '%"></i></div><b>' + money(byCat[c]) + '</b></div>').join('') + '</details>';
   }
-  html += '<h2 class="section-title">Expenses</h2>';
   if (expenses.length) {
-    html += '<div class="card corner">' + expenses.map(e =>
-      '<button class="expense" data-act="edit-expense" data-id="' + esc(e.id) + '"><span><b>' + esc(e.title) + '</b>' +
+    html += '<details class="fold" data-key="bd-exp"' + (isOpen('bd-exp', true) ? ' open' : '') + '><summary>Expenses (' + expenses.length + ')' + ICON.chev + '</summary>' + expenses.map(e =>
+      '<button class="card rowcard" data-act="edit-expense" data-id="' + esc(e.id) + '"><span class="dtext"><b>' + esc(e.title) + '</b>' +
       '<small>' + esc([fmtDate(e.date), e.cat, e.who].filter(Boolean).join(' · ')) + '</small></span>' +
-      '<span class="amt">' + money(e.amount, e.cur) + (e.cur !== 'USD' ? '<small>' + money(toUSD(e.amount, e.cur)) + '</small>' : '') + '</span></button>').join('') + '</div>';
-  } else {
-    html += '<p class="empty card">No expenses yet. Costs on booked items count automatically.</p>';
+      '<span class="amt">' + money(e.amount, e.cur) + '</span></button>').join('') + '</details>';
   }
-  html += '<button class="btn ghost" style="margin-top:10px" data-act="add-expense">+ Add an expense</button></div>';
-  return html;
+  return html + '<button class="link" data-act="edit-budget">Budget and exchange rates (1 EUR = $' + esc(s.rateEUR) + ', 1 CHF = $' + esc(s.rateCHF) + ')</button></div>';
 }
 
-function listsView() {
-  const items = all('todo').filter(t => t.list === ui.list);
-  const left = items.filter(t => !t.done).length;
+// To-do and packing. Only the first section with something left starts open; finished items tuck away at the bottom.
+function listView(kind) {
+  const items = all('todo').filter(t => t.list === kind);
+  const open = items.filter(t => !t.done);
+  const done = items.filter(t => t.done);
   const row = t => '<div class="todo ' + (t.done ? 'done' : '') + '"><input type="checkbox" data-act="toggle" data-id="' + esc(t.id) + '"' + (t.done ? ' checked' : '') +
     ' aria-label="Done: ' + esc(t.text) + '"><button data-act="edit-todo" data-id="' + esc(t.id) + '">' + esc(t.text) + '</button></div>';
-  let html = '<div class="wrap"><div class="seg">' +
-    '<button data-act="list" data-list="todo" aria-pressed="' + (ui.list === 'todo') + '" class="' + (ui.list === 'todo' ? 'on' : '') + '">To do</button>' +
-    '<button data-act="list" data-list="pack" aria-pressed="' + (ui.list === 'pack') + '" class="' + (ui.list === 'pack' ? 'on' : '') + '">Packing</button></div>' +
-    '<p class="small muted" style="margin:0 0 10px">' + left + ' of ' + items.length + ' left</p>';
-  if (!items.length) html += '<p class="empty card">Nothing here yet.</p>';
-  else if (ui.list === 'todo') {
+  let html = head(kind === 'todo' ? 'To do' : 'Packing', true, open.length ? open.length + ' left' : 'All done') + '<div class="wrap">';
+  if (kind === 'todo') {
+    let first = true;
     for (const g of TODO_GROUPS) {
-      const rows = items.filter(t => (TODO_GROUPS.includes(t.group) ? t.group : 'Other') === g);
-      if (rows.length) html += '<h2 class="section-title">' + esc(g) + ' <small>' + rows.filter(t => !t.done).length + ' open</small></h2><div class="card corner">' + rows.map(row).join('') + '</div>';
+      const rows = open.filter(t => (TODO_GROUPS.includes(t.group) ? t.group : 'Other') === g);
+      if (!rows.length) continue;
+      const key = 'g-' + g;
+      html += '<details class="fold" data-key="' + esc(key) + '"' + (isOpen(key, first) ? ' open' : '') + '><summary>' + esc(g) + ' (' + rows.length + ')' + ICON.chev + '</summary>' +
+        '<div class="card">' + rows.map(row).join('') + '</div></details>';
+      first = false;
     }
-  } else {
-    html += '<div class="card corner">' + items.sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0)).map(row).join('') + '</div>';
+  } else if (open.length) {
+    html += '<div class="card">' + open.map(row).join('') + '</div>';
   }
-  html += '<div class="add-todo"><input type="text" id="new-todo" data-list="' + ui.list + '" aria-label="' + (ui.list === 'todo' ? 'New task' : 'New packing item') + '" placeholder="' +
-    (ui.list === 'todo' ? 'Add a task' : 'Add an item') + '" enterkeyhint="done"><button class="btn primary" data-act="add-todo">Add</button></div></div>';
-  return html;
+  if (!open.length) html += '<p class="muted">' + (items.length ? 'Everything here is done.' : 'Nothing here yet.') + '</p>';
+  html += '<div class="add-todo"><input type="text" id="new-todo" data-list="' + kind + '" aria-label="' + (kind === 'todo' ? 'New task' : 'New packing item') + '" placeholder="' +
+    (kind === 'todo' ? 'Add a task' : 'Add an item') + '" enterkeyhint="done"><button class="pill primary" data-act="add-todo">Add</button></div>';
+  if (done.length) {
+    const key = 'done-' + kind;
+    html += '<details class="fold" data-key="' + key + '"' + (isOpen(key, false) ? ' open' : '') + '><summary>Done (' + done.length + ')' + ICON.chev + '</summary>' +
+      '<div class="card">' + done.map(row).join('') + '</div></details>';
+  }
+  return html + '</div>';
 }
 
 // ---------- Map ----------
@@ -427,7 +500,7 @@ function mapView(view) {
   if (map && ui.legCount !== legCount) { map.remove(); map = null; ui.fitted = false; }
   ui.legCount = legCount;
   if (!map || !document.getElementById('map')) {
-    view.innerHTML = '<div class="map-bar"><button class="btn sm" data-act="fit">Whole trip</button>' +
+    view.innerHTML = tripHead() + '<div class="map-bar"><button class="btn sm" data-act="fit">Whole trip</button>' +
       route().legs.map((l, i) => '<button class="btn sm" data-act="leg" data-id="' + i + '"><span class="swatch" style="background:' + l.color + '"></span>' + esc(fmtDate(l.date)) + '</button>').join('') +
       '<button class="btn sm" data-act="add-place">+ Place</button></div>' +
       '<div id="map"></div><div class="map-list" id="map-list"></div>';
@@ -451,9 +524,9 @@ function mapView(view) {
     }
   }
   $('#map-list').innerHTML = places.map(p =>
-    '<button class="place" data-act="show-place" data-id="' + esc(p.id) + '"><span class="dot k-' + esc(p.kind) + '"></span>' +
+    '<button class="place" data-act="show-place" data-id="' + esc(p.id) + '"><span class="sdot k-' + esc(p.kind) + '"></span>' +
     '<span><b>' + esc(p.name) + '</b>' + (p.note ? '<small>' + esc(p.note) + '</small>' : '') + '</span></button>').join('') +
-    '<p class="small muted" style="padding:8px 14px;margin:0">Press and hold the map to drop a pin. Route lines are sketches: use the Google Maps button on each driving day for directions.</p>';
+    '<p class="small muted" style="padding:10px 20px;margin:0">Press and hold the map to drop a pin. The lines are sketches; each driving day has a Google Maps button.</p>';
   // The list below just changed the map's height.
   if (map) { map.invalidateSize(); drawMap(places); }
 }
@@ -670,7 +743,7 @@ async function geocode() {
 // ---------- Events ----------
 document.addEventListener('click', e => {
   const tab = e.target.closest('[data-tab]');
-  if (tab) { ui.tab = tab.dataset.tab; ui.fitted = false; render(); return; }
+  if (tab) { ui.tab = tab.dataset.tab; ui.sub = null; ui.fitted = false; render(); return; }
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const { act, id } = el.dataset;
@@ -681,9 +754,14 @@ document.addEventListener('click', e => {
     case 'theme':
       localStorage.setItem(LS_THEME, document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
       applyTheme();
+      render();
       break;
     case 'save-anyway': if (sheetSave) { sheetSave.allowSensitive = true; $('#sheet-form').requestSubmit(); } break;
-    case 'radio': ui.radio++; render(); break;
+    case 'open': openSub({ type: el.dataset.sub, date: el.dataset.date }); break;
+    case 'back': history.back(); break;
+    case 'seg': ui.seg = el.dataset.seg; ui.fitted = false; render(); break;
+    case 'done-next': put({ ...item, done: true }); toast('Done. One less thing.'); break;
+    case 'skip-next': ui.skip++; render(); break;
     case 'edit-day': dayForm(id); break;
     case 'add-event': eventForm({ date: el.dataset.date, kind: 'sight' }); break;
     case 'edit-event': eventForm(item); break;
@@ -703,7 +781,6 @@ document.addEventListener('click', e => {
     case 'add-expense': expenseForm({}); break;
     case 'edit-expense': expenseForm(item); break;
     case 'edit-budget': budgetForm(); break;
-    case 'list': ui.list = el.dataset.list; render(); break;
     case 'toggle': put({ ...item, done: el.checked }); break;
     case 'edit-todo': todoForm(item); break;
     case 'add-todo': addTodo(); break;
@@ -717,6 +794,16 @@ document.addEventListener('click', e => {
     case 'close': closeSheet(); break;
   }
 });
+// A deeper screen is a step in the phone's own history, so the back gesture closes it instead of leaving the app.
+function openSub(sub) {
+  if (!ui.sub) ui.scrollBack = $('#view').scrollTop;
+  ui.sub = sub;
+  history.pushState({ sub: true }, '');
+  render();
+}
+window.addEventListener('popstate', () => { if (ui.sub) { ui.sub = null; render(); } });
+// Remember which folding sections are open, so a redraw does not close them.
+document.addEventListener('toggle', e => { if (e.target.dataset && e.target.dataset.key) ui.open[e.target.dataset.key] = e.target.open; }, true);
 $('#sheet-form').addEventListener('submit', e => {
   e.preventDefault();
   if (!sheetSave) return closeSheet();
@@ -743,8 +830,9 @@ function addTodo() {
   if (!text) return;
   const hits = sensitiveHits(text);
   if (hits.length && !confirm(sensitiveMessage(hits) + '\n\nSave it anyway?')) return;
-  const item = { id: uid('td'), type: 'todo', list: ui.list, text, done: false };
-  if (ui.list === 'todo') item.group = 'Other';
+  const list = $('#new-todo').dataset.list;
+  const item = { id: uid('td'), type: 'todo', list, text, done: false };
+  if (list === 'todo') item.group = 'Other';
   $('#new-todo').value = '';
   put(item);
   $('#new-todo').focus();
@@ -810,7 +898,7 @@ async function sync() {
   sync();
   nextPhoto();
   setInterval(() => { if (document.visibilityState === 'visible') sync(); }, 30000);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { sync(); renderCountdown(); } });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { sync(); if (!$('#sheet').open) render(); } });
   window.addEventListener('online', sync);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');
 })();
