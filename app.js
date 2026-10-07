@@ -184,7 +184,9 @@ async function nextPhoto() {
     }
     return;
   }
-  // No sync yet: use the copies next to the app. If one is missing, try the next; with none, the 44 badge stays.
+  // A published copy has no photos of its own: until the phone is linked, the 44 badge stays.
+  if (CONFIG.api) return;
+  // No sync at all (testing on this computer): use the copies next to the app, skipping any that are missing.
   const tryAt = n => {
     if (n >= GUIDE_PHOTOS.length) return;
     const src = GUIDE_PHOTOS[(turn + n) % GUIDE_PHOTOS.length];
