@@ -290,7 +290,7 @@ function todayView() {
     quote = 'Get in there!';
     line = 'Home again. What a drive.';
   }
-  let html = '<section class="hero"><div class="hero-btns">' +
+  let html = '<section class="hero"><div class="hero-btns"><span class="wordmark">Monza <b>27</b></span>' +
     '<button class="round" data-act="theme" aria-label="' + (dark ? 'Switch to light theme' : 'Switch to dark theme') + '">' + (dark ? ICON.sun : ICON.moon) + '</button>' +
     '<button class="round" data-act="settings" aria-label="Settings">' + ICON.gear + '</button></div>' +
     '<div class="sun">' + (ui.photo ? '<img src="' + esc(ui.photo) + '" alt="Lewis Hamilton">' : '<span aria-hidden="true">44</span>') + '</div>' +

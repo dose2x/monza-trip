@@ -85,7 +85,9 @@ main.map-mode { padding: 0; display: flex; flex-direction: column; }
   position: relative; text-align: center; color: #fff; background: var(--brand);
   padding: calc(env(safe-area-inset-top) + 16px) 20px 34px; border-radius: 0 0 50% 50% / 0 0 44px 44px;
 }
-.hero-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.hero-btns { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.wordmark { margin-right: auto; font: 600 22px Fredoka, Nunito, sans-serif; letter-spacing: .01em; }
+.wordmark b { font-weight: 600; color: var(--accent); }
 .hero .round { background: rgba(255, 255, 255, .18); color: #fff; }
 .sun {
   width: 112px; height: 112px; margin: 0 auto 12px; border-radius: 50%; background: var(--accent); color: #2a1838;
