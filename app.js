@@ -18,8 +18,8 @@ const EVENT_KINDS = ['race', 'drive', 'travel', 'stay', 'food', 'sight', 'other'
 const PLACE_KINDS = ['track', 'city', 'stay', 'sight', 'food', 'airport', 'idea'];
 const BOOKING_KINDS = ['flight', 'hotel', 'car', 'tickets', 'other'];
 const KIND_COLOR = {
-  race: '#e10600', track: '#e10600', tickets: '#e10600', drive: '#ff8000', car: '#ff8000', travel: '#0093cc', airport: '#0093cc', flight: '#0093cc',
-  stay: '#a071ee', hotel: '#a071ee', food: '#f5b53d', idea: '#f5b53d', sight: '#27c9b4', city: '#8a8a99', other: '#8a8a99',
+  race: '#9400d3', track: '#9400d3', tickets: '#9400d3', drive: '#d957d4', car: '#d957d4', travel: '#6a6ae6', airport: '#6a6ae6', flight: '#6a6ae6',
+  stay: '#a67ea6', hotel: '#a67ea6', food: '#e39a2d', idea: '#e39a2d', sight: '#2a9d8f', city: '#8f84a0', other: '#8f84a0',
 };
 const CATS = ['Flights', 'Lodging', 'Car and fuel', 'Tickets', 'Food', 'Shopping', 'Other'];
 const BOOKING_CAT = { flight: 'Flights', hotel: 'Lodging', car: 'Car and fuel', tickets: 'Tickets', other: 'Other' };
@@ -251,7 +251,7 @@ function render() {
   const screen = ui.tab + '/' + (ui.sub ? ui.sub.type + (ui.sub.date || '') : ui.seg || '');
   if (screen !== ui.screen) { view.scrollTop = ui.sub ? 0 : ui.scrollBack || 0; ui.scrollBack = 0; ui.screen = screen; }
   const hero = ui.tab === 'today' && !ui.sub;
-  $('meta[name=theme-color]').content = getComputedStyle(document.documentElement).getPropertyValue(hero ? '--red' : '--bg').trim();
+  $('meta[name=theme-color]').content = getComputedStyle(document.documentElement).getPropertyValue(hero ? '--brand' : '--bg').trim();
   const again = $('#new-todo');
   if (draft && again && again.dataset.list === draft.list) {
     again.value = draft.text;
@@ -274,25 +274,28 @@ function todayView() {
   const me = localStorage.getItem(LS_ME) || 'Rachel';
   const dark = document.documentElement.dataset.theme === 'dark';
   const ph = phase();
-  let line, bubble;
+  // The catchphrase belongs to the photo; the two lines under the greeting carry the countdown.
+  let quote = 'It\'s hammer time!', line, line2 = '';
+  const r = daysUntil(RACE_DATE);
+  const lights = r > 1 ? r + ' days to lights out at Monza' : r === 1 ? 'Lights out at Monza tomorrow' : r === 0 ? 'Lights out at Monza today' : '';
   if (ph === 'before') {
     const n = daysUntil(s.start);
     line = n === 1 ? 'Wheels up tomorrow' : n + ' days until wheels up';
-    const r = daysUntil(RACE_DATE);
-    bubble = 'It\'s hammer time. ' + (r === 1 ? 'Lights out at Monza tomorrow.' : r + ' days to lights out at Monza.');
+    line2 = lights;
   } else if (ph === 'during') {
     const list = tripDates();
     line = 'Day ' + (list.indexOf(today) + 1) + ' of ' + list.length;
-    bubble = 'Today: ' + (dayItem(today).title || 'an open day') + '.';
+    line2 = lights;
   } else {
-    line = 'Home again';
-    bubble = 'Get in there. What a drive.';
+    quote = 'Get in there!';
+    line = 'Home again. What a drive.';
   }
   let html = '<section class="hero"><div class="hero-btns">' +
     '<button class="round" data-act="theme" aria-label="' + (dark ? 'Switch to light theme' : 'Switch to dark theme') + '">' + (dark ? ICON.sun : ICON.moon) + '</button>' +
     '<button class="round" data-act="settings" aria-label="Settings">' + ICON.gear + '</button></div>' +
     '<div class="sun">' + (ui.photo ? '<img src="' + esc(ui.photo) + '" alt="Lewis Hamilton">' : '<span aria-hidden="true">44</span>') + '</div>' +
-    '<h1>Ciao, ' + esc(me) + '</h1><p>' + esc(line) + '</p>' +
+    '<div><p class="quote"><span>' + esc(quote) + '</span></p></div>' +
+    '<h1>Ciao, ' + esc(me) + '</h1><p>' + esc(line) + '</p>' + (line2 ? '<p>' + esc(line2) + '</p>' : '') +
     '<div class="flag" aria-hidden="true"><i></i><i></i><i></i></div></section><div class="wrap">';
 
   // Until the plan has arrived there is nothing to show: say how to get it instead.
@@ -302,7 +305,6 @@ function todayView() {
       (linked ? 'Fetching the plan. This needs a connection the first time.' : 'Open the trip link you were sent, or paste the trip code in Settings.') + '</p>' +
       '<button class="pill primary" data-act="' + (linked ? 'retry' : 'settings') + '">' + (linked ? 'Try again' : 'Open Settings') + '</button></section></div>';
   }
-  html += '<p class="bubble">' + esc(bubble) + '</p>';
 
   if (ph === 'during') {
     const d = dayItem(today);
@@ -388,10 +390,10 @@ function planView() {
     '<button class="card door" data-act="open" data-sub="' + sub + '"><span class="blob ' + color + '">' + icon + '</span>' +
     '<span class="dtext"><b>' + title + '</b><small>' + esc(status) + '</small></span>' + ICON.chev + '</button>';
   return head('Get ready') + '<div class="wrap">' +
-    door('todo', 'b-green', ICON.todo, 'To do', open.length ? open.length + ' left' : 'All done') +
-    door('bookings', 'b-red', ICON.ticket, 'Bookings', toBook ? toBook + ' still to book' : 'Everything is booked') +
-    door('pack', 'b-yellow', ICON.bag, 'Packing', pack ? pack + ' to pack' : 'All packed') +
-    door('budget', 'b-blue', ICON.coin, 'Budget', b.budget ? money(b.left) + ' left of ' + money(b.budget) : money(b.total) + ' so far') +
+    door('todo', 'b-a', ICON.todo, 'To do', open.length ? open.length + ' left' : 'All done') +
+    door('bookings', 'b-b', ICON.ticket, 'Bookings', toBook ? toBook + ' still to book' : 'Everything is booked') +
+    door('pack', 'b-c', ICON.bag, 'Packing', pack ? pack + ' to pack' : 'All packed') +
+    door('budget', 'b-d', ICON.coin, 'Budget', b.budget ? money(b.left) + ' left of ' + money(b.budget) : money(b.total) + ' so far') +
     '</div>';
 }
 
