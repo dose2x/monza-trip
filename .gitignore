@@ -11,3 +11,5 @@ tools/
 worker/.wrangler/
 # The sync service is deployed with wrangler, not through this repo.
 worker/
+# Receipts and other documents saved into this folder.
+*.pdf
