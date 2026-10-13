@@ -2,7 +2,7 @@
 // when it is slow or absent. Bump CACHE when the list of shell files changes.
 // A trial copy published under /calm/ keeps its own shell cache, so it and the main app never clear each other's.
 const FAMILY = self.registration.scope.includes('/calm/') ? 'monza-calm-shell-' : 'monza-shell-';
-const CACHE = FAMILY + 'v7';
+const CACHE = FAMILY + 'v8';
 const TILES = 'monza-tiles-v1';
 const MAX_TILES = 1500;
 const SLOW_MS = 2500;

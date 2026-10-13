@@ -248,7 +248,9 @@ function render() {
   if (!mapOn && map) { map.remove(); map = null; }
   if (mapOn) mapView(view);
   else if (ui.sub) view.innerHTML = subView();
-  else view.innerHTML = ui.tab === 'today' ? todayView() : ui.tab === 'trip' ? daysView() : planView();
+  // The builder's credit sits at the foot of the three main screens.
+  else view.innerHTML = (ui.tab === 'today' ? todayView() : ui.tab === 'trip' ? daysView() : planView()) +
+    '<p class="credit">Powered by <a href="https://dose2x.github.io/zephyr-dynamics/" target="_blank" rel="noopener noreferrer">Zephyr Dynamics</a></p>';
   // A different screen starts at its top; redrawing the same screen keeps its place.
   const screen = ui.tab + '/' + (ui.sub ? ui.sub.type + (ui.sub.date || '') : ui.seg || '');
   if (screen !== ui.screen) { view.scrollTop = ui.sub ? 0 : ui.scrollBack || 0; ui.scrollBack = 0; ui.screen = screen; }

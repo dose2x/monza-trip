@@ -65,6 +65,8 @@ svg { flex: none; }
 
 /* Layout */
 main { flex: 1; overflow-y: auto; padding-bottom: 32px; }
+.credit { margin: 40px 0 0; text-align: center; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); line-height: 1.9; }
+.credit a { display: block; font: 400 11px Michroma, Eurostile, "Arial Black", sans-serif; letter-spacing: .04em; color: var(--ink); text-decoration: none; }
 main.map-mode { padding: 0; display: flex; flex-direction: column; }
 .wrap { max-width: 640px; margin: 0 auto; padding: 0 20px; }
 .tabs { display: flex; background: var(--surface); border-top: 1px solid var(--line); padding: 4px 8px env(safe-area-inset-bottom); }
