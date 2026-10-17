@@ -9,7 +9,7 @@ const SPECIAL_DAYS = ['2027-09-06'];
 const LS_THEME = 'monza-trip-theme';
 const LS_PHOTO = 'monza-trip-photo';
 const LS_PHOTO_LIST = 'monza-trip-photo-list';
-const PHOTO_CACHE = 'monza-photos-v1';
+const PHOTO_CACHE = 'monza-photos-v2';
 // Guide photos: a different one is shown each time the app is opened.
 // Once sync is set up they come from the private trip database; these local copies are only for testing on this computer.
 const GUIDE_PHOTOS = ['lewis1.jpg', 'lewis2.webp', 'lewis3.webp', 'lewis4.webp', 'lewis5.webp', 'lewis6.webp', 'lewis7.webp', 'lewis8.webp'];
@@ -54,7 +54,9 @@ function settings() { return state.items.settings; }
 // The driving legs and airport hops drawn on the map, kept with the rest of the plan.
 function route() {
   const r = state.items.route;
-  return r && !r.deleted ? { legs: r.legs || [], hops: r.hops || [] } : { legs: [], hops: [] };
+  if (!r || r.deleted) return { legs: [], hops: [] };
+  const color = c => /^#[0-9a-f]{3,8}$/i.test(c) ? c : '#8f84a0';
+  return { legs: (r.legs || []).map(l => ({ ...l, color: color(l.color) })), hops: r.hops || [] };
 }
 function put(item) {
   item.updatedAt = Date.now();
@@ -161,21 +163,24 @@ async function nextPhoto() {
   localStorage.setItem(LS_PHOTO, String(turn + 1));
   const key = localStorage.getItem(LS_KEY);
   if (CONFIG.api && key) {
-    const base = CONFIG.api.replace(/\/$/, '') + '/trip/' + encodeURIComponent(key) + '/photos';
+    const base = CONFIG.api.replace(/\/$/, '') + '/trip/photos';
+    const opts = { headers: { 'X-Trip-Key': key } };
     let names = [];
     try { names = JSON.parse(localStorage.getItem(LS_PHOTO_LIST) || '[]'); } catch (e) { /* refetch below */ }
     try {
-      const res = await fetch(base, { cache: 'no-store' });
+      const res = await fetch(base, { ...opts, cache: 'no-store' });
       if (res.ok) { names = (await res.json()).photos; localStorage.setItem(LS_PHOTO_LIST, JSON.stringify(names)); }
     } catch (e) { /* offline: use the remembered list */ }
     // Each photo is kept on the phone after its first download, so the guide still has a face offline.
+    // The old photo cache was keyed by URLs that contained the trip code.
+    if (window.caches) caches.delete('monza-photos-v1');
     const store = window.caches ? await caches.open(PHOTO_CACHE) : null;
     for (let n = 0; n < names.length; n++) {
       const url = base + '/' + encodeURIComponent(names[(turn + n) % names.length]);
       try {
         let res = store && await store.match(url);
         if (!res) {
-          res = await fetch(url);
+          res = await fetch(url, opts);
           if (!res.ok) continue;
           if (store) store.put(url, res.clone());
         }
@@ -658,7 +663,8 @@ function placeForm(p) {
     if (!v.lat || !v.lon) return fail('Tap "Find on map" to place it first.');
     put({ ...merged(p, v, ch), id: p.id || uid('pl'), type: 'place' });
   }, isNew ? null : () => remove(p.id),
-  '<button type="button" class="btn sm" style="margin-top:10px" data-act="geocode">Find on map</button>');
+  '<button type="button" class="btn sm" style="margin-top:10px" data-act="geocode">Find on map</button>' +
+  '<p class="small muted" style="margin:8px 4px 0">Find on map sends the name you typed to OpenStreetMap\'s search.</p>');
 }
 function bookingForm(b) {
   const isNew = !b.id;
@@ -875,17 +881,18 @@ async function runSync() {
   const key = localStorage.getItem(LS_KEY);
   if (!CONFIG.api || !key) { syncState = 'local'; return; }
   syncState = 'syncing';
-  const url = CONFIG.api.replace(/\/$/, '') + '/trip/' + encodeURIComponent(key);
+  const url = CONFIG.api.replace(/\/$/, '') + '/trip';
+  const auth = { 'X-Trip-Key': key };
   try {
     const sending = Object.keys(state.dirty).map(id => state.items[id]).filter(Boolean);
     if (sending.length) {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: sending }) });
+      const res = await fetch(url, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ items: sending }) });
       if (!res.ok) throw new Error('push ' + res.status);
       for (const it of sending) if (state.items[it.id].updatedAt === it.updatedAt) delete state.dirty[it.id];
       const refused = (await res.json()).rejected || [];
-      if (refused.length) toast(refused.length + ' item too large to sync. It stays on this phone only.');
+      if (refused.length) toast(refused.length === 1 ? 'One change could not sync. It stays on this phone only.' : refused.length + ' changes could not sync. They stay on this phone only.');
     }
-    const res = await fetch(url + '?since=' + state.cursor, { cache: 'no-store' });
+    const res = await fetch(url + '?since=' + state.cursor, { headers: auth, cache: 'no-store' });
     if (!res.ok) throw new Error('pull ' + res.status);
     const data = await res.json();
     let changed = false;
@@ -905,6 +912,10 @@ async function runSync() {
 
 // ---------- Start ----------
 (function start() {
+  if (window.top !== window.self) {
+    document.body.innerHTML = '<p style="padding:40px 24px;text-align:center"><a href="' + location.origin + location.pathname + '" target="_top" rel="noopener">Open Monza 27</a></p>';
+    return;
+  }
   const m = location.hash.match(/k=([\w-]{16,})/);
   if (m) localStorage.setItem(LS_KEY, m[1]);
   applyTheme();
