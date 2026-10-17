@@ -213,6 +213,10 @@ const ICON = {
   coin: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M14.5 9.5c-.6-.9-1.500-1.300-2.600-1.300-1.400 0-2.400.8-2.400 1.900 0 2.600 5.200 1.200 5.200 3.900 0 1.100-1.100 1.900-2.600 1.900-1.200 0-2.200-.5-2.800-1.400M12 6.500v1.700M12 15.900v1.600"/></svg>',
 };
 function isOpen(key, fallback) { return key in ui.open ? ui.open[key] : fallback; }
+// A folding section. `title` is markup the caller has already escaped; `fallback` is whether it starts open.
+function fold(key, title, body, fallback) {
+  return '<details class="fold" data-key="' + esc(key) + '"' + (isOpen(key, fallback) ? ' open' : '') + '><summary>' + title + ICON.chev + '</summary>' + body + '</details>';
+}
 function phase() {
   const s = settings(), today = isoDate(new Date());
   return today < s.start ? 'before' : today > s.end ? 'after' : 'during';
@@ -253,7 +257,12 @@ function render() {
     '<p class="credit">Powered by <a href="https://dose2x.github.io/zephyr-dynamics/" target="_blank" rel="noopener noreferrer">Zephyr Dynamics</a></p>';
   // A different screen starts at its top; redrawing the same screen keeps its place.
   const screen = ui.tab + '/' + (ui.sub ? ui.sub.type + (ui.sub.date || '') : ui.seg || '');
-  if (screen !== ui.screen) { view.scrollTop = ui.sub ? 0 : ui.scrollBack || 0; ui.scrollBack = 0; ui.screen = screen; }
+  // Coming back from a deeper screen returns to where the list was left.
+  if (screen !== ui.screen) {
+    if (ui.sub) view.scrollTop = 0;
+    else { view.scrollTop = ui.scrollBack || 0; ui.scrollBack = 0; }
+    ui.screen = screen;
+  }
   const hero = ui.tab === 'today' && !ui.sub;
   $('meta[name=theme-color]').content = getComputedStyle(document.documentElement).getPropertyValue(hero ? '--brand' : '--bg').trim();
   const again = $('#new-todo');
@@ -321,8 +330,9 @@ function todayView() {
 
   const open = openTodos();
   if (open.length) {
-    const next = open[ui.skip % open.length];
-    const rest = open.filter(t => t.id !== next.id).slice(0, 2);
+    const at = ui.skip % open.length;
+    const next = open[at];
+    const rest = [...open.slice(at + 1), ...open.slice(0, at)].slice(0, 2);
     html += '<h2 class="label">Next up</h2><section class="card pad focus">' +
       '<p class="tag">' + esc(next.group || 'To do') + '</p><p class="big">' + esc(next.text) + '</p>' +
       '<div class="row"><button class="pill primary" data-act="done-next" data-id="' + esc(next.id) + '">Mark done</button>' +
@@ -374,10 +384,9 @@ function dayView(date) {
     '<button class="pill" data-act="add-event" data-date="' + date + '">+ Add a plan</button>';
   const facts = [['Drive', day.drive], ['Roads', day.roads], ['Backup', day.backup]].filter(f => f[1]);
   if (facts.length || safeUrl(day.map)) {
-    const key = 'drive-' + date;
-    html += '<details class="fold" data-key="' + key + '"' + (isOpen(key, false) ? ' open' : '') + '><summary>Driving details' + ICON.chev + '</summary>' +
+    html += fold('drive-' + date, 'Driving details',
       '<dl class="facts">' + facts.map(f => '<dt>' + f[0] + '</dt><dd>' + esc(f[1]) + '</dd>').join('') + '</dl>' +
-      (safeUrl(day.map) ? '<a class="pill" href="' + esc(safeUrl(day.map)) + '" target="_blank" rel="noopener">Open route in Google Maps</a>' : '') + '</details>';
+      (safeUrl(day.map) ? '<a class="pill" href="' + esc(safeUrl(day.map)) + '" target="_blank" rel="noopener">Open route in Google Maps</a>' : ''), false);
   }
   return html + '<button class="link" data-act="edit-day" data-id="' + esc(day.id) + '">Edit this day</button></div>';
 }
@@ -397,7 +406,7 @@ function planView() {
     door('todo', 'b-a', ICON.todo, 'To do', open.length ? open.length + ' left' : 'All done') +
     door('bookings', 'b-b', ICON.ticket, 'Bookings', toBook ? toBook + ' still to book' : 'Everything is booked') +
     door('pack', 'b-c', ICON.bag, 'Packing', pack ? pack + ' to pack' : 'All packed') +
-    door('budget', 'b-d', ICON.coin, 'Budget', b.budget ? money(b.left) + ' left of ' + money(b.budget) : money(b.total) + ' so far') +
+    door('budget', 'b-d', ICON.coin, 'Budget', !b.budget ? money(b.total) + ' so far' : b.left < 0 ? 'Over by ' + money(-b.left) : money(b.left) + ' left of ' + money(b.budget)) +
     '</div>';
 }
 
@@ -411,11 +420,10 @@ function bookingsView() {
   };
   const todo = list.filter(b => b.status !== 'booked');
   const booked = list.filter(b => b.status === 'booked');
-  const fold = (key, title, rows, fallback) => rows.length
-    ? '<details class="fold" data-key="' + key + '"' + (isOpen(key, fallback) ? ' open' : '') + '><summary>' + title + ' (' + rows.length + ')' + ICON.chev + '</summary>' + rows.map(row).join('') + '</details>' : '';
+  const section = (key, title, rows, fallback) => rows.length ? fold(key, title + ' (' + rows.length + ')', rows.map(row).join(''), fallback) : '';
   // Before the trip the open bookings matter; on the road the confirmed ones do.
   const during = phase() !== 'before';
-  const parts = [fold('bk-todo', 'Still to book', todo, !during), fold('bk-done', 'Booked', booked, during || !todo.length)];
+  const parts = [section('bk-todo', 'Still to book', todo, !during), section('bk-done', 'Booked', booked, during || !todo.length)];
   return head('Bookings', true) + '<div class="wrap">' + (during ? parts.reverse() : parts).join('') +
     (list.length ? '' : '<p class="muted">No bookings yet.</p>') +
     '<button class="pill" data-act="add-booking">+ Add a booking</button></div>';
@@ -446,7 +454,7 @@ function budgetView() {
   let html = head('Budget', true) + '<div class="wrap"><section class="card pad">';
   if (budget) {
     const pct = Math.min(100, (total + planned) / budget * 100);
-    html += '<p class="huge">' + money(left) + '</p><p class="muted" style="margin:0">left of ' + money(budget) + '</p>' +
+    html += '<p class="huge">' + money(Math.abs(left)) + '</p><p class="muted" style="margin:0">' + (left < 0 ? 'over the ' + money(budget) + ' budget' : 'left of ' + money(budget)) + '</p>' +
       '<div class="meter"><i class="' + (left < 0 ? 'over' : '') + '" style="width:' + pct.toFixed(0) + '%"></i></div>';
   } else {
     html += '<p class="huge">' + money(total) + '</p><p class="muted" style="margin:0">committed so far</p>';
@@ -455,14 +463,14 @@ function budgetView() {
     '<button class="pill" data-act="add-expense">+ Add an expense</button>';
   const cats = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]);
   if (cats.length) {
-    html += '<details class="fold" data-key="bd-cats"' + (isOpen('bd-cats', false) ? ' open' : '') + '><summary>By category' + ICON.chev + '</summary>' +
-      cats.map(c => '<div class="cat"><span>' + esc(c) + '</span><div class="meter"><i style="width:' + (byCat[c] / max * 100).toFixed(0) + '%"></i></div><b>' + money(byCat[c]) + '</b></div>').join('') + '</details>';
+    html += fold('bd-cats', 'By category',
+      cats.map(c => '<div class="cat"><span>' + esc(c) + '</span><div class="meter"><i style="width:' + (byCat[c] / max * 100).toFixed(0) + '%"></i></div><b>' + money(byCat[c]) + '</b></div>').join(''), false);
   }
   if (expenses.length) {
-    html += '<details class="fold" data-key="bd-exp"' + (isOpen('bd-exp', true) ? ' open' : '') + '><summary>Expenses (' + expenses.length + ')' + ICON.chev + '</summary>' + expenses.map(e =>
+    html += fold('bd-exp', 'Expenses (' + expenses.length + ')', expenses.map(e =>
       '<button class="card rowcard" data-act="edit-expense" data-id="' + esc(e.id) + '"><span class="dtext"><b>' + esc(e.title) + '</b>' +
       '<small>' + esc([fmtDate(e.date), e.cat, e.who].filter(Boolean).join(' · ')) + '</small></span>' +
-      '<span class="amt">' + money(e.amount, e.cur) + '</span></button>').join('') + '</details>';
+      '<span class="amt">' + money(e.amount, e.cur) + '</span></button>').join(''), true);
   }
   return html + '<button class="link" data-act="edit-budget">Budget and exchange rates (1 EUR = $' + esc(s.rateEUR) + ', 1 CHF = $' + esc(s.rateCHF) + ')</button></div>';
 }
@@ -480,9 +488,7 @@ function listView(kind) {
     for (const g of TODO_GROUPS) {
       const rows = open.filter(t => (TODO_GROUPS.includes(t.group) ? t.group : 'Other') === g);
       if (!rows.length) continue;
-      const key = 'g-' + g;
-      html += '<details class="fold" data-key="' + esc(key) + '"' + (isOpen(key, first) ? ' open' : '') + '><summary>' + esc(g) + ' (' + rows.length + ')' + ICON.chev + '</summary>' +
-        '<div class="card">' + rows.map(row).join('') + '</div></details>';
+      html += fold('g-' + g, esc(g) + ' (' + rows.length + ')', '<div class="card">' + rows.map(row).join('') + '</div>', first);
       first = false;
     }
   } else if (open.length) {
@@ -492,9 +498,7 @@ function listView(kind) {
   html += '<div class="add-todo"><input type="text" id="new-todo" data-list="' + kind + '" aria-label="' + (kind === 'todo' ? 'New task' : 'New packing item') + '" placeholder="' +
     (kind === 'todo' ? 'Add a task' : 'Add an item') + '" enterkeyhint="done"><button class="pill primary" data-act="add-todo">Add</button></div>';
   if (done.length) {
-    const key = 'done-' + kind;
-    html += '<details class="fold" data-key="' + key + '"' + (isOpen(key, false) ? ' open' : '') + '><summary>Done (' + done.length + ')' + ICON.chev + '</summary>' +
-      '<div class="card">' + done.map(row).join('') + '</div></details>';
+    html += fold('done-' + kind, 'Done (' + done.length + ')', '<div class="card">' + done.map(row).join('') + '</div>', false);
   }
   return html + '</div>';
 }
@@ -749,7 +753,11 @@ async function geocode() {
 // ---------- Events ----------
 document.addEventListener('click', e => {
   const tab = e.target.closest('[data-tab]');
-  if (tab) { ui.tab = tab.dataset.tab; ui.sub = null; ui.fitted = false; render(); return; }
+  if (tab) {
+    // Leaving a deeper screen by tab: drop its history step too, or the next back press would do nothing.
+    if (ui.sub) { ui.sub = null; history.back(); }
+    ui.tab = tab.dataset.tab; ui.scrollBack = 0; ui.fitted = false; render(); return;
+  }
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const { act, id } = el.dataset;
@@ -855,13 +863,17 @@ function exportBackup() {
 
 // ---------- Sync ----------
 let syncTimer = null;
-let syncing = false;
+let syncRun = null;
 function queueSync() { clearTimeout(syncTimer); syncTimer = setTimeout(sync, 1200); }
-async function sync() {
+// Returns the sync in progress if there is one (and queues another), so callers can wait for a real result.
+function sync() {
+  if (syncRun) { queueSync(); return syncRun; }
+  syncRun = runSync().finally(() => { syncRun = null; });
+  return syncRun;
+}
+async function runSync() {
   const key = localStorage.getItem(LS_KEY);
   if (!CONFIG.api || !key) { syncState = 'local'; return; }
-  if (syncing) return queueSync();
-  syncing = true;
   syncState = 'syncing';
   const url = CONFIG.api.replace(/\/$/, '') + '/trip/' + encodeURIComponent(key);
   try {
@@ -888,8 +900,6 @@ async function sync() {
     if (changed && !$('#sheet').open) render();
   } catch (e) {
     syncState = navigator.onLine ? 'error' : 'offline';
-  } finally {
-    syncing = false;
   }
 }
 

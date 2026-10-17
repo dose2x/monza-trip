@@ -92,7 +92,7 @@ main.map-mode { padding: 0; display: flex; flex-direction: column; }
 .wordmark b { font-weight: 600; color: var(--accent); }
 .hero .round { background: rgba(255, 255, 255, .18); color: #fff; }
 .sun {
-  width: 112px; height: 112px; margin: 0 auto 12px; border-radius: 50%; background: var(--accent); color: #2a1838;
+  width: 112px; height: 112px; margin: 0 auto; border-radius: 50%; background: var(--accent); color: #2a1838;
   display: grid; place-items: center; overflow: hidden; border: 5px solid var(--accent); position: relative; z-index: 1;
   font: 600 40px Fredoka, sans-serif;
 }
@@ -103,7 +103,6 @@ main.map-mode { padding: 0; display: flex; flex-direction: column; }
 .flag i { width: 22px; height: 6px; border-radius: 3px; background: #fff; }
 .flag i:first-child { background: #2fae73; }
 .flag i:last-child { background: #f0483e; }
-.sun { margin-bottom: 0; }
 .quote {
   position: relative; display: inline-block; margin: 12px 0 14px; padding: 7px 18px 8px; border-radius: 999px;
   background: #fff; color: #2a1838; font: 600 19px Fredoka, Nunito, sans-serif; transform: rotate(-2deg);
